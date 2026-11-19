@@ -52,10 +52,8 @@ docs/       보고서
 | writer (사용자에게 보이는 문장) | `gpt-5.6-luna` | Step 4 꼬리질문, Step 5 추가질문, 메모 첫 질문, 실시간 글·최종 완성, 문체 프로필 |
 | fast (내부 분석) | `deepseek-v4-flash` | Step 1 쿼리·경험 판단, Step 3 측면 추출, 지표 문장 판정 |
 
-모델 이름·주소·호출별 등급은 `server/.env`에서 바꿀 수 있어요 (`server/.env.example` 참고).
-
 ### API 키 설정 (팀원용)
-두 모델 모두 VibeHub LLM 게이트웨이 하나로 불러요. 키도 하나예요.
+**server폴더에 .env파일 만들어서 엔드포인트 url, api key 넣기. (server/.env.example 참고)**
 1. `cp server/.env.example server/.env`
 2. `server/.env`의 `MINIAPP_LLM_BASE_URL`, `MINIAPP_LLM_API_KEY`를 채워요. 값은 팀에서 안전한 경로로 받아요.
 3. API 서버를 다시 켜요.
