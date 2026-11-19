@@ -16,3 +16,7 @@ rag/index/*
 # OS / Node
 .DS_Store
 node_modules/
+
+# 개인 DB (사용자 계정·글·메모)
+server/data/*
+!server/data/.gitkeep

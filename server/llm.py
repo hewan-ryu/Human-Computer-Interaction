@@ -12,21 +12,21 @@ from __future__ import annotations
 import json
 import os
 
-import anthropic
-
 MODEL = os.getenv("LLM_MODEL", "claude-opus-5-5")
 EFFORT = os.getenv("LLM_EFFORT", "medium")      # low | medium | high | xhigh | max
 
-_client: anthropic.Anthropic | None = None
+_client = None
 
 
 class LLMError(RuntimeError):
     pass
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client():
     global _client
     if _client is None:
+        import anthropic
+
         _client = anthropic.Anthropic()
     return _client
 
