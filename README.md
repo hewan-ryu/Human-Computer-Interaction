@@ -5,7 +5,7 @@
 
 ```
 front/      UI (정적 웹앱, `npm run dev`)
-server/     대화 API + RAG 질문 루프 (FastAPI, Claude)
+server/     대화 API + RAG 질문 루프 (FastAPI, gpt-5.6-luna + deepseek-v4-flash)
 rag/        블로그 DB 벡터 검색 (임베딩, 인덱스 생성, 검색)
 prompts/    작성 AI 프롬프트, 질문 루프 Step별 프롬프트
 db/         블로그 포스팅 DB (crawler/ 수집·전처리, raw/, processed/)
@@ -44,13 +44,23 @@ docs/       보고서
 ```
 
 - 코드: `server/question_loop.py`, 상태: `server/state.py`
+
+## LLM 모델 배분 (`server/llm.py`)
+
+| 등급 | 기본 모델 | 호출 |
+|---|---|---|
+| writer (사용자에게 보이는 문장) | `gpt-5.6-luna` | Step 4 꼬리질문, Step 5 추가질문, 메모 첫 질문, 실시간 글·최종 완성, 문체 프로필 |
+| fast (내부 분석) | `deepseek-v4-flash` | Step 1 쿼리·경험 판단, Step 3 측면 추출, 지표 문장 판정 |
+
+모델 이름·주소·호출별 등급은 `server/.env`에서 바꿀 수 있어요 (`server/.env.example` 참고).
+fast 모델은 JSON 모드로 받고 코드에서 스키마를 검사해, 틀리면 한 번 다시 요청해요.
 - 프롬프트: `prompts/writing_ai.md` (말투·형식), `prompts/question_loop/step*.md`
 
 ## 실행
 
 ```sh
 pip install -r server/requirements.txt
-cp server/.env.example server/.env        # ANTHROPIC_API_KEY 입력
+cp server/.env.example server/.env        # OPENAI_API_KEY, DEEPSEEK_API_KEY 입력
 python -m rag.build_index                 # db/processed/clean.json 필요
 uvicorn server.app:app --reload --port 8000
 python -m pytest tests                    # 테스트

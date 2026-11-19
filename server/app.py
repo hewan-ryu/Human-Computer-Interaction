@@ -3,7 +3,7 @@
 
 실행 (저장소 루트에서):
     pip install -r server/requirements.txt
-    cp server/.env.example server/.env    # ANTHROPIC_API_KEY 입력
+    cp server/.env.example server/.env    # OPENAI_API_KEY, DEEPSEEK_API_KEY 입력
     python -m rag.build_index             # 공통 DB 벡터 인덱스 (최초 1회)
     uvicorn server.app:app --reload --port 8000
 
@@ -61,8 +61,8 @@ else:
     fetch_posts = fetch_latest_posts
 
 try:
-    from anthropic import APIError as _APIError
-except ImportError:                                  # 데모 모드에서 anthropic이 없어도 동작
+    from openai import APIError as _APIError
+except ImportError:                                  # 데모 모드에서 openai가 없어도 동작
     class _APIError(Exception):
         pass
 from .llm import LLMError  # noqa: E402
