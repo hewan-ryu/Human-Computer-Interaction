@@ -89,3 +89,15 @@ def test_schema_errors():
     assert llm.schema_errors({"question": "a", "n": 1}, SCHEMA) == []
     assert llm.schema_errors({"question": "a", "n": True}, SCHEMA) == ["$.n: integer이어야 함"]
     assert "$.x: 스키마에 없는 키" in llm.schema_errors({"question": "a", "n": 1, "x": 0}, SCHEMA)
+
+
+def test_vibehub_gateway_is_default_for_both_tiers(monkeypatch):
+    for k in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "WRITER_API_KEY", "FAST_API_KEY", "WRITER_BASE_URL", "FAST_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("MINIAPP_LLM_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("MINIAPP_LLM_API_KEY", "gw-key")
+    for name in ("writer", "fast"):
+        tier = llm.tier_config(name)
+        assert tier.base_url == "https://gateway.example/v1" and tier.api_key == "gw-key"
+    assert llm.tier_config("writer").model == "gpt-5.6-luna"
+    assert llm.tier_config("fast").model == "deepseek-v4-flash"

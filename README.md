@@ -53,6 +53,15 @@ docs/       보고서
 | fast (내부 분석) | `deepseek-v4-flash` | Step 1 쿼리·경험 판단, Step 3 측면 추출, 지표 문장 판정 |
 
 모델 이름·주소·호출별 등급은 `server/.env`에서 바꿀 수 있어요 (`server/.env.example` 참고).
+
+### API 키 설정 (팀원용)
+두 모델 모두 VibeHub LLM 게이트웨이 하나로 불러요. 키도 하나예요.
+1. `cp server/.env.example server/.env`
+2. `server/.env`의 `MINIAPP_LLM_BASE_URL`, `MINIAPP_LLM_API_KEY`를 채워요. 값은 팀에서 안전한 경로로 받아요.
+3. API 서버를 다시 켜요.
+
+- `server/.env`는 `.gitignore`에 있어 커밋되지 않아요. 키를 코드, README, 채팅에 적지 마세요.
+- VibeHub에 배포한 앱에는 이 두 값이 자동으로 들어가요 (AI Agent 모델 사용 승인 후 재배포 필요).
 fast 모델은 JSON 모드로 받고 코드에서 스키마를 검사해, 틀리면 한 번 다시 요청해요.
 - 프롬프트: `prompts/writing_ai.md` (말투·형식), `prompts/question_loop/step*.md`
 
@@ -60,7 +69,7 @@ fast 모델은 JSON 모드로 받고 코드에서 스키마를 검사해, 틀리
 
 ```sh
 pip install -r server/requirements.txt
-cp server/.env.example server/.env        # OPENAI_API_KEY, DEEPSEEK_API_KEY 입력
+cp server/.env.example server/.env        # MINIAPP_LLM_BASE_URL, MINIAPP_LLM_API_KEY 입력 (아래 'API 키 설정')
 python -m rag.build_index                 # db/processed/clean.json 필요
 uvicorn server.app:app --reload --port 8000
 python -m pytest tests                    # 테스트

@@ -3,7 +3,7 @@
 
 실행 (저장소 루트에서):
     pip install -r server/requirements.txt
-    cp server/.env.example server/.env    # OPENAI_API_KEY, DEEPSEEK_API_KEY 입력
+    cp server/.env.example server/.env    # MINIAPP_LLM_BASE_URL, MINIAPP_LLM_API_KEY 입력
     python -m rag.build_index             # 공통 DB 벡터 인덱스 (최초 1회)
     uvicorn server.app:app --reload --port 8000
 

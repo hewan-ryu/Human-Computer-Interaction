@@ -5,9 +5,12 @@ LLM 호출 래퍼: 시스템 프롬프트 + 입력 → JSON(dict)
   - writer: 사용자에게 보이는 문장 (질문·공감·질문 이유, 블로그 글, 문체 프로필)  기본 gpt-5.6-luna
   - fast:   화면에 안 보이는 내부 분석 (쿼리·경험 판단, 측면 추출, 지표 문장 판정) 기본 deepseek-v4-flash
 
-설정 (server/.env)
-  WRITER_MODEL / WRITER_API_KEY / WRITER_BASE_URL   (키 기본값: OPENAI_API_KEY, 주소 기본값: OpenAI)
-  FAST_MODEL   / FAST_API_KEY   / FAST_BASE_URL     (키 기본값: DEEPSEEK_API_KEY, 주소 기본값: https://api.deepseek.com)
+설정
+  기본: VibeHub LLM 게이트웨이 하나로 두 모델을 모두 부른다.
+        MINIAPP_LLM_BASE_URL / MINIAPP_LLM_API_KEY  (VibeHub 배포 앱에는 자동 주입, 로컬은 server/.env)
+  등급별로 따로 쓰려면 (server/.env):
+  WRITER_MODEL / WRITER_API_KEY / WRITER_BASE_URL   (게이트웨이가 없으면 OPENAI_API_KEY, OpenAI 주소)
+  FAST_MODEL   / FAST_API_KEY   / FAST_BASE_URL     (게이트웨이가 없으면 DEEPSEEK_API_KEY, https://api.deepseek.com)
   WRITER_STRICT_SCHEMA=1 / FAST_STRICT_SCHEMA=0     1: response_format json_schema(strict)로 형식 강제
                                                     0: JSON 모드 + 스키마를 프롬프트에 넣고 코드로 검사
   LLM_ROUTE_<STEP>=writer|fast                      호출별 등급 바꾸기 (예: LLM_ROUTE_STEP5_FOLLOWUP=fast)
@@ -58,14 +61,17 @@ def _env(key: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def tier_config(name: str) -> Tier:
+    gateway_url, gateway_key = _env("MINIAPP_LLM_BASE_URL"), _env("MINIAPP_LLM_API_KEY")
     if name == "writer":
         return Tier("writer", _env("WRITER_MODEL", "gpt-5.6-luna"),
-                    _env("WRITER_API_KEY", _env("OPENAI_API_KEY")), _env("WRITER_BASE_URL"),
+                    _env("WRITER_API_KEY", gateway_key or _env("OPENAI_API_KEY")),
+                    _env("WRITER_BASE_URL", gateway_url),
                     _env("WRITER_STRICT_SCHEMA", "1") == "1",
                     _env("WRITER_TOKEN_PARAM", "max_completion_tokens"))
     if name == "fast":
         return Tier("fast", _env("FAST_MODEL", "deepseek-v4-flash"),
-                    _env("FAST_API_KEY", _env("DEEPSEEK_API_KEY")), _env("FAST_BASE_URL", "https://api.deepseek.com"),
+                    _env("FAST_API_KEY", gateway_key or _env("DEEPSEEK_API_KEY")),
+                    _env("FAST_BASE_URL", gateway_url or "https://api.deepseek.com"),
                     _env("FAST_STRICT_SCHEMA", "0") == "1",
                     _env("FAST_TOKEN_PARAM", "max_tokens"))
     raise ValueError(f"알 수 없는 모델 등급: {name}")
@@ -84,7 +90,8 @@ _clients: dict = {}
 
 def _make_client(tier: Tier):
     if not tier.api_key:
-        key_name = "WRITER_API_KEY 또는 OPENAI_API_KEY" if tier.name == "writer" else "FAST_API_KEY 또는 DEEPSEEK_API_KEY"
+        key_name = ("MINIAPP_LLM_API_KEY(VibeHub) 또는 " +
+                    ("WRITER_API_KEY/OPENAI_API_KEY" if tier.name == "writer" else "FAST_API_KEY/DEEPSEEK_API_KEY"))
         raise LLMError(f"{tier.name} 모델의 API 키가 없습니다. server/.env에 {key_name}를 넣어 주세요.")
     from openai import OpenAI
 
