@@ -14,15 +14,21 @@ def make_docs(n, prefix="doc"):
 class FakeLLM:
     """step 이름별로 미리 정한 응답을 차례로 돌려준다."""
 
-    def __init__(self, tails=None, followups=None):
+    def __init__(self, tails=None, followups=None, targets=None, experience=None, empathy=""):
         self.calls = []
+        self.experience = list(experience or [])     # step1 has_experience 응답 차례 (없으면 True)
+        self.empathy = empathy
         self.tails = list(tails or [])
         self.followups = list(followups or [])
+        self.targets = list(targets or [])
 
     def __call__(self, step, system, user, schema):
         self.calls.append((step, system, user))
+        if step == "opening_from_memo":
+            return {"question": "메모 속 그날 이야기를 더 들려주세요."}
         if step == "step1_query":
-            return {"query": "성수동 카페 방문 후기"}
+            has = self.experience.pop(0) if self.experience else True
+            return {"has_experience": has, "query": "성수동 카페 방문 후기" if has else None}
         if step == "step3_aspects":
             ids = [line.split('"')[1] for line in user.splitlines() if line.startswith("<doc id=")]
             return {"aspects": [
@@ -32,7 +38,8 @@ class FakeLLM:
             ]}
         if step == "step4_tail_question":
             q = self.tails.pop(0) if self.tails else None
-            return {"question": q, "target": "분위기/조명", "reason": "r"}
+            t = self.targets.pop(0) if self.targets else "분위기/조명"
+            return {"empathy": self.empathy, "question": q, "target": t, "reason": "r"}
         if step == "step5_followup":
             q = self.followups.pop(0) if self.followups else None
             return {"need_followup": q is not None, "question": q, "reason": "r"}
@@ -79,7 +86,7 @@ def test_followups_capped_then_next_tail():
     # 추가질문 2회 소진 → Step 5 없이 다음 꼬리질문
     assert loop.handle_user_message(s, "그냥요") == "Q2"
     assert llm.steps().count("step5_followup") == MAX_FOLLOWUPS
-    assert [q.kind for q in s.asked_questions] == ["tail", "followup", "followup", "tail"]
+    assert [q.kind for q in s.asked_questions] == ["opening", "tail", "followup", "followup", "tail"]
     assert s.followup_count == 0
 
 
@@ -152,3 +159,117 @@ def test_split_chunks():
     from rag.embedder import split_chunks
     chunks = split_chunks("가" * 200 + ". " + "나" * 200 + ". 다.", max_chars=300)
     assert len(chunks) == 2 and all(len(c) <= 300 for c in chunks)
+
+
+# ---------------------------------------------------------------- 넘어가기 / 메모 / 더 쓰러 가기
+from server.question_loop import NO_EXPERIENCE_MESSAGE, OPENING_REASON, REOPEN_MESSAGE, fmt_conversation  # noqa: E402
+
+
+def test_skip_records_target_and_moves_on():
+    llm = FakeLLM(tails=["Q1", "Q2"], followups=["F1"], targets=["분위기/조명", "가격/메뉴별 가격대"])
+    loop = QuestionLoop(llm, FakeSearch(make_docs(15)))
+    s, _ = loop.start()
+    assert loop.handle_user_message(s, "카페 다녀왔어요") == "Q1"
+    n5 = llm.steps().count("step5_followup")
+    assert loop.handle_user_message(s, "", skip=True) == "Q2"
+    assert llm.steps().count("step5_followup") == n5          # 넘기면 추가질문 없이 다음 꼬리질문
+    assert [q.target for q in s.skipped] == ["분위기/조명"]
+    assert s.conversation[-2].kind == "skip"
+    step4_input = [c for c in llm.calls if c[0] == "step4_tail_question"][-1][2]
+    assert "분위기/조명" in step4_input.split("<skipped_questions>")[1]
+
+
+def test_step4_choosing_skipped_target_is_retried():
+    llm = FakeLLM(tails=["Q1", "같은 주제 또", "다른 질문"],
+                  targets=["분위기/조명", "분위기/조명", "가격/메뉴별 가격대"])
+    loop = QuestionLoop(llm, FakeSearch(make_docs(15)))
+    s, _ = loop.start()
+    loop.handle_user_message(s, "카페")
+    assert loop.handle_user_message(s, "", skip=True) == "다른 질문"
+    assert "같은 주제 또" not in [q.question for q in s.asked_questions]
+
+
+def test_skip_opening_without_story():
+    llm = FakeLLM()
+    loop = QuestionLoop(llm, FakeSearch(make_docs(15)))
+    s, _ = loop.start()
+    assert loop.handle_user_message(s, "", skip=True) == NO_EXPERIENCE_MESSAGE
+    assert llm.calls == [] and s.needs_topic
+
+
+def test_start_from_memo():
+    llm = FakeLLM(tails=["Q1"])
+    loop = QuestionLoop(llm, FakeSearch(make_docs(15)))
+    s, first = loop.start(memo_text="성수 카페 창가 자리, 비 오는 날", memo_id="m1")
+    assert first == "메모 속 그날 이야기를 더 들려주세요."
+    assert s.memo_id == "m1" and s.conversation[0].kind == "memo"
+    loop.handle_user_message(s, "토요일 오후였어요")
+    query_input = [c for c in llm.calls if c[0] == "step1_query"][0][2]
+    assert "성수 카페 창가 자리" in query_input                 # 메모가 검색 쿼리 재료에 들어감
+
+
+def test_reopen_asks_missing_items_first():
+    llm = FakeLLM(tails=[None, None, None, "부족한 것 질문"], targets=["", "", "", "가격/메뉴별 가격대"])
+    docs = make_docs(30)
+    loop = QuestionLoop(llm, FakeSearch(docs), get_docs=lambda ids: [d for d in docs if d["doc_id"] in set(ids)])
+    s, _ = loop.start()
+    assert loop.handle_user_message(s, "카페") == CLOSING_MESSAGE
+    assert s.finished and s.round == 3
+    s.skipped.append(s.asked_questions[0].model_copy(update={"target": "분위기/음악"}))
+    reply = loop.reopen(s, ["가격/메뉴별 가격대", "분위기/음악"])
+    assert reply == f"{REOPEN_MESSAGE}\n\n부족한 것 질문"
+    assert not s.finished and s.round_limit == 5
+    step4_input = [c for c in llm.calls if c[0] == "step4_tail_question"][-1][2]
+    assert '["가격/메뉴별 가격대"]' in step4_input                # 넘긴 항목은 우선순위에서 제외
+    assert {d.doc_id for d in s.cached_docs} >= {"doc_0", "doc_1"}  # 지난 라운드 참고 글 다시 불러옴
+    assert s.priority_targets == []                              # 물어본 항목은 우선순위에서 빠짐
+
+
+# ---------------------------------------------------------------- 작성 AI 호출 규칙
+def test_opening_question_and_reason():
+    loop = QuestionLoop(FakeLLM(), FakeSearch(make_docs(15)))
+    s, first = loop.start()
+    assert first == "최근에 글로 남기고 싶었던 경험이 있나요? 있다면 자세히 작성해주세요."
+    assert s.conversation[0].reason == OPENING_REASON
+
+
+def test_no_experience_shows_topic_then_recovers():
+    llm = FakeLLM(tails=["Q1"], experience=[False, True])
+    search = FakeSearch(make_docs(15))
+    loop = QuestionLoop(llm, search)
+    s, _ = loop.start()
+    assert loop.handle_user_message(s, "딱히 생각이 안 나요") == NO_EXPERIENCE_MESSAGE
+    assert s.needs_topic and s.round == 0 and search.excludes == []     # 검색하지 않음
+    assert s.material_count() == 0                                      # "생각이 안 나요"는 글 재료가 아님
+    assert loop.handle_user_message(s, "어제 성수 카페에 갔어요") == "Q1"
+    assert not s.needs_topic and s.round == 1
+
+
+def test_empathy_and_reason_attached_to_question():
+    llm = FakeLLM(tails=["조명은 어땠어요?"], empathy="창가 자리였군요!")
+    loop = QuestionLoop(llm, FakeSearch(make_docs(15)))
+    s, _ = loop.start()
+    reply = loop.handle_user_message(s, "성수 카페 창가 자리에 앉았어요")
+    assert reply == "창가 자리였군요!\n\n조명은 어땠어요?"
+    last = s.conversation[-1]
+    assert last.content == "조명은 어땠어요?" and last.empathy == "창가 자리였군요!" and last.reason == "r"
+    assert s.asked_questions[-1].reason == "r"
+    # Step 4에는 요소별 참고 글 수가 들어감
+    step4_input = [c for c in llm.calls if c[0] == "step4_tail_question"][-1][2]
+    assert '"조명": 2' in step4_input
+
+
+def test_not_included_answer_skips_followup_and_draft():
+    llm = FakeLLM(tails=["Q1", "Q2"], followups=["F1"])
+    loop = QuestionLoop(llm, FakeSearch(make_docs(15)))
+    s, _ = loop.start()
+    loop.handle_user_message(s, "성수 카페에 다녀왔어요")
+    n5 = llm.steps().count("step5_followup")
+    assert loop.handle_user_message(s, "조명은 그냥 그랬어요", include=False) == "Q2"
+    assert llm.steps().count("step5_followup") == n5          # 추가질문 없이 다음 꼬리질문
+    assert s.material_count() == 1
+    loop_text = fmt_conversation(s)
+    draft_text = fmt_conversation(s, for_draft=True)
+    assert "조명은 그냥 그랬어요 (글에 반영 안 함)" in loop_text   # 질문 루프는 알고 있음 (다시 묻지 않게)
+    assert "조명은 그냥 그랬어요" not in draft_text and "Q1" not in draft_text
+    assert "성수 카페에 다녀왔어요" in draft_text
